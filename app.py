@@ -23,6 +23,8 @@ def index():
         session['message'] = ''
         session['challenge'] = False  # Indicates if a challenge is pending
         session['challenged_player'] = None
+        session['player1_wins'] = 0
+        session['player2_wins'] = 0
         return redirect(url_for('game'))
     return render_template('index.html')
 
@@ -39,6 +41,8 @@ def game():
     message = session.get('message', '')
     challenge_pending = session.get('challenge', False)
     challenged_player_key = session.get('challenged_player', None)
+    player1_wins = session.get('player1_wins', 0)
+    player2_wins = session.get('player2_wins', 0)
 
     if request.method == 'POST':
         action = request.form.get('action')
@@ -55,13 +59,15 @@ def game():
         elif action == 'challenge':
             challenger_key = current_player_key
             challenged_player_key = get_opponent_player_key(challenger_key)
-            if len(fragment) < 4:
-                # Proceed with challenge even if fragment is less than 4 letters
-                pass  # Frontend handles the popup
             if fragment in WORDS and len(fragment) >= 4:  # Assuming minimum word length is 4
                 # Challenger wins immediately
                 challenger = get_player_name(challenger_key)
                 message = f"The fragment '{fragment}' is a complete word. {challenger} (Challenger) wins!"
+                # Update win tally
+                if challenger_key == 'player1':
+                    session['player1_wins'] += 1
+                else:
+                    session['player2_wins'] += 1
                 reset_game()
                 session['message'] = message
                 return redirect(url_for('game'))
@@ -70,6 +76,17 @@ def game():
                 session['challenge'] = True
                 session['challenged_player'] = challenged_player_key
                 return redirect(url_for('challenge'))
+        elif action == 'start_new_game':
+            # Reset game but keep the same players and their win tallies
+            reset_game()
+            session['fragment'] = ''
+            session['current_player'] = 'player1'
+            session['message'] = ''
+            return redirect(url_for('game'))
+        elif action == 'new_game_with_new_players':
+            # Clear all session data and redirect to index for new players
+            session.clear()
+            return redirect(url_for('index'))
 
     return render_template('game.html',
                            player1=player1,
@@ -78,7 +95,9 @@ def game():
                            current_player=get_player_name(session['current_player']),
                            message=message,
                            challenge_pending=challenge_pending,
-                           fragment_length=len(fragment))
+                           fragment_length=len(fragment),
+                           player1_wins=player1_wins,
+                           player2_wins=player2_wins)
 
 @app.route('/challenge', methods=['GET', 'POST'])
 def challenge():
@@ -94,25 +113,40 @@ def challenge():
     challenger_key = get_opponent_player_key(challenged_player_key)
     challenger = get_player_name(challenger_key)
     message = session.get('message', '')
+    player1_wins = session.get('player1_wins', 0)
+    player2_wins = session.get('player2_wins', 0)
 
     if request.method == 'POST':
-        word = request.form.get('word', '').strip().upper()
-        if not word:
-            flash('Please enter a word.')
+        suffix = request.form.get('suffix', '').strip().upper()
+        if not suffix:
+            flash('Please enter the letters to complete the word.')
             return redirect(url_for('challenge'))
 
-        # Check if the word starts with the fragment
-        if not word.startswith(fragment):
-            flash(f"The word '{word}' does not start with the fragment '{fragment}'.")
+        # Ensure that the suffix does not contain spaces or invalid characters
+        if not suffix.isalpha():
+            flash('Please enter only alphabetic characters for the suffix.')
             return redirect(url_for('challenge'))
 
-        # Check if the word exists in the dictionary and meets minimum length
-        if word in WORDS and len(word) >= 4:
+        # Concatenate fragment and suffix to form the complete word
+        complete_word = fragment + suffix
+
+        # Check if the complete word exists in the dictionary and is longer than the fragment
+        if complete_word in WORDS and len(complete_word) > len(fragment):
             # Challenged player provided a valid word
-            message = f"{challenged_player} provided the word '{word}', which is valid. {challenger} (Challenger) loses!"
+            message = f"{challenged_player} completed the word to form '{complete_word}', which is valid. {challenger} (Challenger) loses!"
+            # Update win tally for challenged player
+            if challenged_player_key == 'player1':
+                session['player1_wins'] += 1
+            else:
+                session['player2_wins'] += 1
         else:
             # Challenged player failed to provide a valid word
-            message = f"{challenged_player} failed to provide a valid word starting with '{fragment}'. {challenger} (Challenger) wins!"
+            message = f"{challenged_player} failed to complete the word with '{complete_word}'. {challenger} (Challenger) wins!"
+            # Update win tally for challenger
+            if challenger_key == 'player1':
+                session['player1_wins'] += 1
+            else:
+                session['player2_wins'] += 1
 
         # Reset the game after challenge
         reset_game()
